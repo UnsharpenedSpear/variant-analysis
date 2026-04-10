@@ -1,0 +1,29 @@
+# data files - too large for git
+data/raw/
+data/processed/
+data/truth/
+
+# keep the folder structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/truth/.gitkeep
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# jupyter
+.ipynb_checkpoints/
+
+# ml model
+src/ml/model.pkl
+
+# environment
+.env
+*.log
+
+# os
+.DS_Store
+Thumbs.db

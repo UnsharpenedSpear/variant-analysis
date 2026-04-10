@@ -1,0 +1,12 @@
+PyVCF3
+pandas
+requests
+matplotlib
+seaborn
+plotly
+dash
+dash-bootstrap-components
+scikit-learn
+joblib
+pytest
+pyarrow 
