@@ -10,9 +10,9 @@ ANNOTATED_PATH = os.path.join("data", "processed", "annotated.parquet")
 
 VEP_URL = "https://rest.ensembl.org/vep/human/region"
 
-BATCH_SIZE = 200
+BATCH_SIZE = 50
 SAMPLE_SIZE = 50000
-SLEEP_BETWEEN = 1.0
+SLEEP_BETWEEN = 2.0
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -39,7 +39,7 @@ def format_variant(row) -> str:
 def query_vep(batch) -> list:
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     body = json.dumps({"variants": batch})
-    response = requests.post(VEP_URL, headers=headers, data=body, timeout=30)
+    response = requests.post(VEP_URL, headers=headers, data=body, timeout=60)
     response.raise_for_status()
     return response.json()
 
@@ -77,6 +77,10 @@ def parse_result(result: dict) -> dict:
     }
 
 def annotate_variants(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.dropna(subset=["ref", "alt"])
+    df = df[df["alt"].str.match(r'^[ACGT]+$', na=False)]
+    df = df[df["ref"].str.match(r'^[ACGT]+$', na=False)]
+
     formatted = [format_variant(row) for row in df.itertuples()]
 
     batches = [formatted[i:i+BATCH_SIZE] for i in range(0, len(formatted), BATCH_SIZE)]
@@ -98,7 +102,7 @@ def annotate_variants(df: pd.DataFrame) -> pd.DataFrame:
                 record = parse_result(result)
                 if (record['chrom'], record['pos']) not in done:
                     all_records.append(record)
-        except requests.exceptions.RequestException as e:    
+        except (requests.exceptions.RequestException, KeyboardInterrupt) as e:    
             logging.warning(f"Batch {i} failed: {e}, skipping...")
             time.sleep(5)
             continue
