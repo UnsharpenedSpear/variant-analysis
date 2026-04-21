@@ -1,3 +1,14 @@
+"""
+Feature Engineering Pipeline for Variant Classification
+
+Transforms annotated variant data into ML-ready features:
+- Chromsoome encoding (1-22, X, Y, MT)
+- Nucleotide properties (transitions, GC content)
+- Variant metadata (novelty, coding status)
+- Consequence type one-hot encoding
+
+Output: 31 features for binary pathogenic/benign classification
+"""
 import pandas as pd
 import os
 import json
@@ -9,6 +20,7 @@ FEATURES_PATH = os.path.join("data", "processed", "features.parquet")
 FEATURE_NAMES_PATH = os.path.join("data", "processed", "feature_names.json")
 
 def load_and_clean(path=ANNOTATED_PATH):
+    """Load annotated variants and remove duplicates/missing labels."""
     df = pd.read_parquet(path)
     logging.info(f"Loaded {len(df)} variants from {path}")
     logging.info(f"Shape: {df.shape}")
@@ -21,13 +33,15 @@ def load_and_clean(path=ANNOTATED_PATH):
     logging.info(f"Shape: {df.shape}")
     return df  
 
-def  encode_chrom(df : pd.DataFrame) -> pd.DataFrame:
+def encode_chrom(df : pd.DataFrame) -> pd.DataFrame:
+    """Map chromosome names to integers: 1-22, X=23, Y=24, MT=25."""
     chrom_map = {str(i): i for i in range(1, 23)}
     chrom_map.update({"X": 23, "Y": 24, "MT": 25})
     df["chrom_encoded"] = df["chrom"].map(chrom_map).fillna(-1).astype(int)
     return df
 
 def add_nucleotide_features(df : pd.DataFrame) -> pd.DataFrame:
+    """Extract nucleotide-level features: transitions, GC content."""
     transitions = {"AG", "GA", "CT", "TC"}
     df["is_transition"] = (df["ref"] + df["alt"]).isin(transitions).astype(int)
     df["ref_is_gc"] = df["ref"].isin(["G", "C"]).astype(int)
@@ -35,12 +49,14 @@ def add_nucleotide_features(df : pd.DataFrame) -> pd.DataFrame:
     return df
 
 def add_variant_features(df : pd.DataFrame) -> pd.DataFrame:
+    """Add variant metadata: is_novel (based on rs_id), is_coding (consequence-based)."""
     df["is_novel"] = (df["rs_id"] == "novel").astype(int)
     coding_consequences = {"missense_variant", "synonymous_variant", "stop_gained", "stop_lost", "start_lost", "frameshift_variant", "inframe_insertion", "inframe_deletion", "splice_donor_variant", "splice_acceptor_variant", "protein_altering_variant"}
     df["is_coding"] = df["consequence"].isin(coding_consequences).astype(int)
     return df
 
 def encode_consequence(df : pd.DataFrame) -> pd.DataFrame:
+    """One-hot encode VEP consequence types into binary features."""
     dummies = pd.get_dummies(df["consequence"], prefix="csq", dtype=int)
 
     df = pd.concat([df, dummies], axis=1)
@@ -49,6 +65,7 @@ def encode_consequence(df : pd.DataFrame) -> pd.DataFrame:
     return df
 
 def finalise_features(df : pd.DataFrame) -> pd.DataFrame:
+    """Drop identifier columns, fill NaNs, ensure all features are int64."""
     df["is_novel"] = df["is_novel"].astype(int)
     df["is_coding"] = df["is_coding"].astype(int)
     df.drop(columns=["gene_id", "gene_symbol","rs_id", "clin_sig", "cldn", "impact", "chrom", "ref", "alt"], inplace=True, errors="ignore")
@@ -56,6 +73,7 @@ def finalise_features(df : pd.DataFrame) -> pd.DataFrame:
     return df   
 
 def save_features(df : pd.DataFrame, features_path=FEATURES_PATH, feature_names_path=FEATURE_NAMES_PATH):
+    """Save processed features to parquet and feature names to JSON for reproducibility."""
     label = df["label"]
     features = df.drop(columns=["label"])
     feature_names = features.columns.tolist()
