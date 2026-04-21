@@ -5,33 +5,15 @@ import time
 import json
 import logging
 
-PROCESSED_PATH = os.path.join("data", "processed", "variants.parquet")
-ANNOTATED_PATH = os.path.join("data", "processed", "annotated.parquet")
+PROCESSED_PATH = os.path.join("data", "processed", "clinvar.parquet")
+ANNOTATED_PATH = os.path.join("data", "processed", "clinvar_annotated.parquet")
 
 VEP_URL = "https://rest.ensembl.org/vep/human/region"
 
 BATCH_SIZE = 50
-SAMPLE_SIZE = 50000
 SLEEP_BETWEEN = 2.0
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-def sample_variants(df: pd.DataFrame, n: int = SAMPLE_SIZE) -> pd.DataFrame:
-    chrom_proportion = df['chrom'].value_counts(normalize=True)
-    sample_chrom_counts = (chrom_proportion * n).round().astype(int)
-
-    sample_chrom_counts = sample_chrom_counts.clip(lower=1)
-
-    sampled_dfs = []
-    for chrom, count in sample_chrom_counts.items():
-        chrom_df = df[df['chrom'] == chrom]
-        if len(chrom_df) <= count:
-            sampled_dfs.append(chrom_df)
-        else:
-            sampled_dfs.append(chrom_df.sample(count, random_state=42))
-
-    logging.info(f"Sampled {sum(len(df) for df in sampled_dfs):,} variants across {len(sampled_dfs)} chromosomes.") 
-    return pd.concat(sampled_dfs, ignore_index=True)
 
 def format_variant(row) -> str:
     return f"{row.chrom} {row.pos} {row.pos} {row.ref}/{row.alt} 1"
@@ -77,9 +59,6 @@ def parse_result(result: dict) -> dict:
     }
 
 def annotate_variants(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.dropna(subset=["ref", "alt"])
-    df = df[df["alt"].str.match(r'^[ACGT]+$', na=False)]
-    df = df[df["ref"].str.match(r'^[ACGT]+$', na=False)]
 
     formatted = [format_variant(row) for row in df.itertuples()]
 
@@ -102,9 +81,14 @@ def annotate_variants(df: pd.DataFrame) -> pd.DataFrame:
                 record = parse_result(result)
                 if (record['chrom'], record['pos']) not in done:
                     all_records.append(record)
-        except (requests.exceptions.RequestException, KeyboardInterrupt) as e:    
+        except (requests.exceptions.RequestException, KeyboardInterrupt) as e:
             logging.warning(f"Batch {i} failed: {e}, skipping...")
-            time.sleep(5)
+
+            if "NameResolutionError" in str(e) or "getaddrinfo" in str(e):
+                logging.warning("Internet appears down, waiting 60 seconds...")
+                time.sleep(60)
+            else:
+                time.sleep(5)
             continue
 
         time.sleep(SLEEP_BETWEEN)
@@ -120,7 +104,33 @@ def annotate_variants(df: pd.DataFrame) -> pd.DataFrame:
 
 if __name__ == "__main__":
     df = pd.read_parquet(PROCESSED_PATH)
-    sampled = sample_variants(df)
+    
+    pathogenic = {"Pathogenic", "Likely_pathogenic", "Pathogenic/Likely_pathogenic"}
+    benign = {"Benign", "Likely_benign", "Benign/Likely_benign"}
+    
+    df = df.dropna(subset=["ref", "alt"])
+    df = df[df["alt"].str.match(r'^[ACGT]+$', na=False)]
+    df = df[df["ref"].str.match(r'^[ACGT]+$', na=False)]
+    
+    patho_df = df[df["clin_sig"].isin(pathogenic)].sample(10000, random_state=42)
+    benign_df = df[df["clin_sig"].isin(benign)].sample(10000, random_state=42)
+    
+    sampled = pd.concat([patho_df, benign_df], ignore_index=True)
+    
+    label_map = {**{s: 1 for s in pathogenic}, **{s: 0 for s in benign}}
+    sampled["label"] = sampled["clin_sig"].map(label_map)
+    
+    logging.info(f"Sampled {len(sampled):,} variants — {sampled['label'].sum():,} pathogenic, {(sampled['label']==0).sum():,} benign")
+    
     annotated = annotate_variants(sampled)
+    
+    annotated = annotated.merge(
+        sampled[["chrom", "pos", "label", "clin_sig", "cldn"]],
+        on=["chrom", "pos"],
+        how="left"
+    )
+    
+    annotated.to_parquet(ANNOTATED_PATH, index=False)
     print(annotated.shape)
+    print(annotated["label"].value_counts())
     print(annotated["consequence"].value_counts())
