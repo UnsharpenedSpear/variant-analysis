@@ -190,7 +190,7 @@ MODEL_TYPE = 'ensemble'  # 'rf', 'xgb', 'lr', or 'ensemble'
 
 ## Author
 
-UnbrokenSpear — April 2026
+UnsharpenedSpear — April 2026
 
 ## License
 
