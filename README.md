@@ -1,115 +1,138 @@
 # Variant Analysis Portfolio
 
-A bioinformatics machine learning pipeline for classifying genetic variants as pathogenic or benign using ClinVar data and VEP annotations.
+A bioinformatics ML pipeline for classifying genetic variants as pathogenic or benign using ClinVar data and Ensembl VEP annotations.
 
-## Project Overview
+## Overview
 
-This project implements a complete ML pipeline to predict pathogenic vs. benign genetic variants using:
-- **Data Source**: ClinVar database (~20,000 variants)
-- **Annotation**: Ensembl VEP (Variant Effect Predictor)
-- **Features**: Genomic properties, mutation types, and functional annotations
+This project implements an end-to-end variant pathogenicity classification pipeline:
+
+- **Data source**: ClinVar database (GRCh37), ~16,000 annotated variants
+- **Annotation**: Ensembl VEP REST API (consequence types, gene impact, novelty)
+- **Features**: 31 engineered genomic features (nucleotide chemistry, consequence encoding, chromosomal position)
 - **Model**: Ensemble (RandomForest + XGBoost) with SMOTE balancing and threshold tuning
+- **Dashboard**: Interactive Plotly/Dash app for exploring predictions and model performance
 
-### Key Performance Metrics
-- **Accuracy**: 60.98%
-- **Recall**: 77.12% ✓ (priority: catch pathogenic variants)
-- **Precision**: 51.76%
-- **F1-Score**: 61.94%
-- **ROC AUC**: 69.60%
-- **Optimal Threshold**: 0.35
+## Performance
 
-*Note: High recall (77%) prioritizes identifying pathogenic variants over false positive reduction, suitable for clinical downstream validation.*
+| Metric | Score |
+|--------|-------|
+| Accuracy | 60.98% |
+| Precision | 51.76% |
+| Recall | 77.12% |
+| F1-Score | 61.94% |
+| ROC AUC | 69.60% |
+| Optimal threshold | 0.35 |
+
+High recall (77%) is intentional — in clinical genomics, missing a pathogenic variant is worse than a false positive. The threshold is tuned to prioritise sensitivity over specificity.
+
+## Model Comparison
+
+| Model | Accuracy | Precision | Recall | F1 | ROC AUC |
+|-------|----------|-----------|--------|----|---------|
+| Random Forest | 64.87% | 57.94% | 53.58% | 55.67% | 68.39% |
+| XGBoost | 64.78% | 56.68% | 61.40% | 58.94% | 69.87% |
+| Logistic Regression | 41.17% | 51.76% | 77.12% | 61.94% | 69.60% |
+| **Ensemble** | **60.98%** | **51.76%** | **77.12%** | **61.94%** | **69.60%** |
+
+## Top 10 Features
+
+1. `pos` — genomic position
+2. `chrom_encoded` — chromosome as integer
+3. `is_transition` — Ti/Tv substitution type
+4. `alt_is_gc` — alternate allele GC content
+5. `ref_is_gc` — reference allele GC content
+6. `is_novel` — variant novelty (no known rsID)
+7. `csq_intron_variant` — intronic consequence
+8. `csq_intergenic_variant` — intergenic consequence
+9. `csq_downstream_gene_variant` — downstream region
+10. `csq_upstream_gene_variant` — upstream region
 
 ## Pipeline Architecture
 
 ```
-Data Ingestion → Annotation → Feature Engineering → Model Training → Evaluation
+ClinVar VCF
+    → parse & label (pathogenic=1, benign=0)
+    → sample 10k pathogenic + 10k benign
+    → VEP annotation (consequence, impact, gene)
+    → feature engineering (31 features)
+    → SMOTE balancing
+    → ensemble training
+    → threshold-tuned evaluation
+    → Dash dashboard
 ```
 
-### 1. Data Ingestion (`src/ingestion/`)
-- **`clinvar.py`**: Download, decompress, and parse ClinVar VCF data
-  - Downloads from NCBI FTP
-  - Extracts clinical significance labels (pathogenic/benign)
-  - Outputs: `data/processed/clinvar.parquet`
+## Project Structure
 
-- **`download.py`**: Download 1000 Genomes variants
-  - Reference data for alternative variants
-  - Outputs: `data/raw/variants.vcf.gz`
+```
+variant-analysis-portfolio/
+├── data/
+│   ├── raw/                        # Downloaded VCF files
+│   ├── processed/                  # Parsed and engineered data
+│   │   ├── clinvar.parquet         # Parsed ClinVar variants
+│   │   ├── clinvar_annotated.parquet  # VEP-annotated with labels
+│   │   ├── features.parquet        # Final ML feature matrix
+│   │   ├── feature_names.json      # Feature column names
+│   │   ├── train_data.parquet      # Training split (80%)
+│   │   └── test_data.parquet       # Test split (20%)
+│   └── truth/
+│       ├── clinvar.vcf.gz          # Raw ClinVar VCF (GRCh37)
+│       └── clinvar.parquet         # Parsed ClinVar labels
+├── results/
+│   ├── model.joblib                # Trained ensemble model
+│   ├── selected_features.json      # Top 20 features used
+│   └── evaluation_metrics_*.json   # Timestamped evaluation results
+├── src/
+│   ├── ingestion/
+│   │   ├── clinvar.py              # ClinVar download and parsing
+│   │   ├── download.py             # 1000 Genomes download
+│   │   └── parse_vcf.py            # VCF parsing utility
+│   ├── annotation/
+│   │   └── vep_api.py              # Ensembl VEP REST API client
+│   ├── analysis/
+│   │   └── metrics.py              # Ti/Tv ratio, variant QC metrics
+│   ├── ml/
+│   │   ├── features.py             # Feature engineering pipeline
+│   │   ├── train.py                # Model training with GridSearchCV
+│   │   └── evaluate.py             # Threshold-tuned evaluation
+│   └── dashboard/
+│       ├── app.py                  # Dash app entry point
+│       ├── layout.py               # Page structure and tab components
+│       ├── figures.py              # Plotly figure generation
+│       └── callbacks.py            # Interactive filter callbacks
+├── tests/
+│   ├── test_parse_vcf.py
+│   ├── test_metrics.py
+│   └── test_features.py
+├── notebooks/
+│   ├── 01_exploration.ipynb
+│   ├── 02_annotation.ipynb
+│   └── 03_ml_model.ipynb
+├── requirements.txt
+├── Makefile
+├── METHODS.md
+└── README.md
+```
 
-- **`parse_vcf.py`**: Parse raw VCF files
-  - Extracts CHROM, POS, REF, ALT, quality metrics
-  - Outputs: `data/processed/variants.parquet`
+## Setup
 
-### 2. Annotation (`src/annotation/`)
-- **`vep_api.py`**: Functional annotation via Ensembl VEP REST API
-  - Queries consequence types (missense, frameshift, etc.)
-  - Extracts gene information and impact levels
-  - Batch processing with retry logic
-  - Outputs: `data/processed/clinvar_annotated.parquet`
-  - Labels: 1 (pathogenic), 0 (benign)
-
-### 3. Feature Engineering (`src/ml/features.py`)
-- **Chromosome Encoding**: Maps chr1-22, X, Y, MT to integers
-- **Nucleotide Features**: Transition/transversion, GC content
-- **Variant Properties**: Novelty (rs_id presence), coding vs. non-coding
-- **Consequence Encoding**: One-hot encoding of 32 functional consequence types
-- **Output**: 31 features, 16,453 variants
-  - Features saved: `data/processed/features.parquet`
-  - Feature names: `data/processed/feature_names.json`
-
-### 4. Model Training (`src/ml/train.py`)
-**Model Options**: `'rf'` (RandomForest), `'xgb'` (XGBoost), `'lr'` (LogisticRegression), `'ensemble'` (Voting)
-
-**Default: Ensemble Model**
-- Combines RandomForest (200 trees, depth=20) + XGBoost (100 estimators, depth=6)
-- Voting: Soft (probability-based)
-
-**Optimization Techniques**:
-1. **Feature Selection**: Top 20 features by importance (reduces noise)
-2. **SMOTE**: Balances minority class (pathogenic) to 50-50
-3. **Hyperparameter Tuning**: 5-fold CV with GridSearchCV (except ensemble)
-4. **Class Weighting**: Balanced weights for RandomForest
-
-**Outputs**:
-- Trained model: `results/model.joblib`
-- Selected features: `results/selected_features.json`
-- Scaler (for LR): `results/scaler.joblib`
-- Train/test splits: `data/processed/train_data.parquet`, `data/processed/test_data.parquet`
-
-### 5. Evaluation (`src/ml/evaluate.py`)
-- **Threshold Tuning**: Automatically finds optimal threshold (0.3-0.8) maximizing F1-score
-- **Metrics**: Accuracy, precision, recall, F1, ROC AUC, confusion matrix, classification report
-- **Output**: Timestamped metrics file: `results/evaluation_metrics_YYYYMMDD_HHMMSS.json`
-
-## Installation
-
-### Requirements
-- Python 3.8+
-- Dependencies: See `requirements.txt`
-
-### Setup
 ```bash
-# Clone/navigate to project
+# Clone and navigate to project
 cd variant-analysis-portfolio
 
 # Install dependencies
 pip install -r requirements.txt
-
-# Create data directories
-mkdir -p data/raw data/processed data/truth results
 ```
 
-## Usage
+## Running the Pipeline
 
-### Full Pipeline (One Shot)
 ```bash
-# 1. Ingest and parse ClinVar data
+# 1. Download and parse ClinVar
 python src/ingestion/clinvar.py
 
-# 2. Annotate with VEP (requires internet)
+# 2. Annotate with VEP (requires internet, takes ~20 mins)
 python src/annotation/vep_api.py
 
-# 3. Generate features
+# 3. Engineer features
 python src/ml/features.py
 
 # 4. Train model
@@ -119,123 +142,56 @@ python src/ml/train.py
 python src/ml/evaluate.py
 ```
 
-### Individual Steps
+## Running the Dashboard
+
 ```bash
-# Feature engineering only
-python src/ml/features.py
+# From project root
+python src/dashboard/app.py
 
-# Retrain with different model type (edit MODEL_TYPE in train.py)
-python src/ml/train.py
-
-# Evaluate current model
-python src/ml/evaluate.py
+# Visit http://127.0.0.1:8050
 ```
 
-### Change Model Type
+### Dashboard Tabs
+
+1. **Dataset Overview** — variant counts, class balance, consequence and chromosome distribution
+2. **Model Performance** — ROC curve, precision-recall curve, confusion matrix, metric cards
+3. **Feature Importance** — top 20 features from the Random Forest component
+4. **Variant Explorer** — filterable table of test set predictions by consequence, predicted label, and actual label
+
+## Changing the Model
+
 Edit `MODEL_TYPE` in `src/ml/train.py`:
+
 ```python
-MODEL_TYPE = 'ensemble'  # or 'rf', 'xgb', 'lr'
+MODEL_TYPE = 'ensemble'  # 'rf', 'xgb', 'lr', or 'ensemble'
 ```
 
-## Data Structure
+## Key Design Decisions
 
-```
-data/
-├── raw/
-│   └── variants.vcf.gz          # 1000 Genomes data
-├── processed/
-│   ├── clinvar.parquet          # Parsed ClinVar variants
-│   ├── clinvar_annotated.parquet # Annotated with VEP
-│   ├── features.parquet         # Final features for ML
-│   ├── feature_names.json       # Feature column names
-│   ├── train_data.parquet       # Training set (80%)
-│   └── test_data.parquet        # Test set (20%)
-└── truth/
-    └── clinvar.vcf              # Raw ClinVar VCF
-    └── clinvar.vcf.gz           # Compressed ClinVar
+- **ClinVar as ground truth**: Labels come from expert-curated clinical submissions rather than proxy metrics, making the classifier scientifically defensible
+- **Balanced sampling**: 10k pathogenic and 10k benign variants sampled before annotation to avoid class imbalance at the source
+- **SMOTE**: Additional synthetic oversampling applied during training to correct residual imbalance
+- **Feature selection**: Top 20 features by importance reduces noise and overfitting without significant performance loss
+- **Threshold tuning**: Optimal threshold found by maximising F1 across the 0.3–0.8 range rather than defaulting to 0.5
 
-results/
-├── model.joblib                 # Trained model
-├── selected_features.json       # Top 20 features used
-├── scaler.joblib                # StandardScaler (for LR)
-└── evaluation_metrics_*.json    # Timestamped evaluation results
+## Future Work
 
-src/
-├── ingestion/
-│   ├── clinvar.py              # ClinVar download/parsing
-│   ├── download.py             # 1000 Genomes download
-│   └── parse_vcf.py            # VCF parsing utility
-├── annotation/
-│   └── vep_api.py              # VEP API integration
-├── ml/
-│   ├── features.py             # Feature engineering
-│   ├── train.py                # Model training
-│   └── evaluate.py             # Model evaluation
-├── analysis/
-│   ├── benchmark.py            # (Empty, for benchmarking)
-│   └── metrics.py              # Variant metrics (Ti/Tv, etc.)
-└── dashboard/
-    ├── app.py                  # Dash app main
-    ├── callbacks.py            # Dash callbacks
-    ├── figures.py              # Plot generation
-    └── layout.py               # UI layout
-```
-
-## Model Comparison
-
-| Model | Accuracy | Precision | Recall | F1-Score | ROC AUC | Use Case |
-|-------|----------|-----------|--------|----------|---------|----------|
-| RandomForest | 64.87% | 57.94% | 53.58% | 55.67% | 68.39% | Balanced, interpretable |
-| XGBoost | 64.78% | 56.68% | 61.40% | 58.94% | 69.87% | Good recall, gradient-boosted |
-| LogisticRegression | 41.17% | 51.76% | 77.12% | 61.94% | 69.60% | Requires scaling, biased |
-| **Ensemble** | **60.98%** | **51.76%** | **77.12%** | **61.94%** | **69.60%** | **Best for clinical use** |
-
-*Ensemble optimizations*: Feature selection (20 features), SMOTE, threshold tuning (0.35)
-
-## Feature Importance (Top 10)
-
-1. `pos` - Genomic position
-2. `chrom_encoded` - Chromosome number
-3. `is_transition` - SNP type (transition vs. transversion)
-4. `alt_is_gc` - Alternate allele GC content
-5. `ref_is_gc` - Reference allele GC content
-6. `is_novel` - Variant novelty (rs_id)
-7. `csq_intron_variant` - Intronic consequence
-8. `csq_intergenic_variant` - Intergenic consequence
-9. `csq_downstream_gene_variant` - Downstream region
-10. `csq_upstream_gene_variant` - Upstream region
-
-## Key Insights
-
-1. **Class Imbalance**: Data is 59% benign, 41% pathogenic. SMOTE corrects this imbalance during training.
-2. **High Recall Priority**: Optimal threshold (0.35) balances recall (77%) over accuracy to prioritize pathogenic detection.
-3. **Feature Reduction**: Top 20 features capture 95%+ of predictive power; reduces overfitting and computational cost.
-4. **Ensemble Strength**: Combining tree-based models leverages their complementary strengths (RF's stability, XGB's accuracy).
-
-## Clinical Notes
-
-- **Recall 77%**: Model catches ~77% of truly pathogenic variants
-- **False Positives**: ~49% of positive predictions are benign (suitable for upstream validation)
-- **Use Case**: Prioritize variants for experimental validation; reduce false negatives in screening
-
-## Future Improvements
-
-- [ ] Add cross-validation stability metrics
-- [ ] Implement feature interaction analysis
-- [ ] Deploy as REST API (Flask/FastAPI)
-- [ ] Add uncertainty quantification (Bayesian ensemble)
-- [ ] Expand to multi-class prediction (pathogenic/likely pathogenic/benign/etc.)
+- Add CADD scores as continuous pathogenicity features (regression extension)
+- UMAP clustering of variant landscape as unsupervised analysis tab
+- Deploy as public REST API via FastAPI + Render
+- Expand to multi-class prediction (Pathogenic / Likely Pathogenic / VUS / Benign)
+- Add cross-validation stability metrics and confidence intervals
 
 ## References
 
 - ClinVar: https://www.ncbi.nlm.nih.gov/clinvar/
 - Ensembl VEP: https://www.ensembl.org/info/docs/tools/vep/index.html
-- 1000 Genomes: https://www.internationalgenome.org/
+- 1000 Genomes Project: https://www.internationalgenome.org/
 
 ## Author
 
-UnbrokenSpear | April 2026
+UnbrokenSpear — April 2026
 
 ## License
 
-MIT (Open for academic/research use)
+MIT

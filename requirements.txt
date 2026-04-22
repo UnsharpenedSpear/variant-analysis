@@ -1,12 +1,24 @@
-PyVCF3
+﻿# Data Processing & ML
 pandas
+numpy
+scikit-learn
+xgboost
+joblib
+imbalanced-learn
+
+# Data Loading & I/O
+pyarrow
+PyVCF3
 requests
+
+# Visualization
 matplotlib
 seaborn
 plotly
+
+# Dashboard
 dash
 dash-bootstrap-components
-scikit-learn
-joblib
+
+# Testing
 pytest
-pyarrow 
